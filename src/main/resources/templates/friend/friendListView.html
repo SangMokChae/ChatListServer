@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+	<meta charset="UTF-8">
+	<title>👥 친구 목록</title>
+	<script src="https://cdn.tailwindcss.com"></script>
+	<style>
+		/* 메뉴 위치 조정 */
+		#dropdownMenu {
+			display: none;
+		}
+		#dropdownMenu.show {
+			display: block;
+		}
+	</style>
+</head>
+<body class="bg-gray-100 min-h-screen font-sans relative">
+
+<!-- ✅ 상단바 -->
+<div class="bg-white shadow p-4 flex justify-between items-center">
+	<h1 class="text-xl font-bold">친구 목록</h1>
+	
+	<!-- ✅ 우측 메뉴 버튼 -->
+	<div class="relative">
+		<button id="menuButton" class="focus:outline-none">
+			<!-- Heroicons "bars-3" -->
+			<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
+					 stroke="currentColor" class="w-6 h-6">
+				<path stroke-linecap="round" stroke-linejoin="round"
+							d="M3.75 5.25h16.5m-16.5 6h16.5m-16.5 6h16.5"/>
+			</svg>
+		</button>
+		
+		<!-- ✅ 드롭다운 메뉴 -->
+		<div id="dropdownMenu"
+				 class="absolute right-0 mt-2 w-40 bg-white border border-gray-200 rounded-md shadow-lg z-10">
+			<a href="/view/friendSearchView"
+				 class="block px-4 py-2 text-gray-700 hover:bg-gray-100">🔍 친구 찾기</a>
+			<a href="/logout" class="block px-4 py-2 text-red-600 hover:bg-red-100">🚪 로그아웃</a>
+		</div>
+	</div>
+</div>
+
+<!-- ✅ 친구 리스트 -->
+<div class="p-4 space-y-4 max-w-md mx-auto">
+	<div th:each="friend : ${friendList}"
+			 class="bg-white p-4 rounded-xl shadow hover:bg-gray-50 transition cursor-pointer"
+			 th:attr="data-id=${friend.friendId}"
+			 ondblclick="openChatWithFriend(this.getAttribute('data-id'))">
+		<div class="text-lg font-semibold" th:text="${friend.friendNickname}">닉네임</div>
+		<div class="text-sm text-gray-500" th:text="'ID: ' + ${friend.friendId}">아이디</div>
+		<div class="text-xs text-gray-400 mt-1" th:text="${friend.status}">상태</div>
+	</div>
+</div>
+
+<!-- ✅ 메뉴 토글 스크립트 + 채팅방 이동 로직 -->
+<script th:inline="javascript">
+	const userId = [[${userId}]];
+	
+	document.getElementById('menuButton').addEventListener('click', function () {
+		const menu = document.getElementById('dropdownMenu');
+		menu.classList.toggle('show');
+	});
+
+	// 클릭 외부 영역 클릭 시 닫기
+	window.addEventListener('click', function (e) {
+		const menu = document.getElementById('dropdownMenu');
+		const button = document.getElementById('menuButton');
+		if (!button.contains(e.target) && !menu.contains(e.target)) {
+			menu.classList.remove('show');
+		}
+	});
+
+	// ✅ 친구 더블 클릭 시 채팅방 열기
+	function openChatWithFriend(friendId) {
+		fetch('/api/friends/chatRoom', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify({ 'friendId' : friendId })
+		})
+		.then(res => {
+			if (!res.ok) throw new Error("채팅방 요청 실패");
+			return res.json();
+		})
+		.then(data => {
+			const form = document.createElement('form');
+			form.method = 'POST';
+			form.action = '/view/chatView'
+			form.enctype = 'application/x-www-form-urlencoded';
+			
+			const input = document.createElement('input');
+			input.type = 'hidden';
+			input.name = 'roomId';
+			input.value = `${data.roomId}`;
+			form.appendChild(input);
+			
+			// 방 새로 생성 할때 inUserIds 설정
+			const input2 = document.createElement('input');
+			input2.type = 'hidden';
+			input2.name = 'inUserIds';
+			let inUserIdsArr = [userId, friendId];
+			input2.value = inUserIdsArr
+			form.appendChild(input2);
+			
+			document.body.appendChild(form);
+			form.submit();
+		})
+		.catch(err => {
+			alert("채팅방 이동 실패: " + err.message);
+		});
+	}
+</script>
+
+</body>
+</html>
