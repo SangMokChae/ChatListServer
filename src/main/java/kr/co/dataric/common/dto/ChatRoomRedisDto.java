@@ -19,6 +19,7 @@ public class ChatRoomRedisDto {
 	private String lastMessage;
 	private LocalDateTime lastMessageTime;
 	private List<String> userIds;
+	private String lastSender;
 	private int readCount;
 	
 	// MongoDB에서 fallback할 때 사용
@@ -30,5 +31,10 @@ public class ChatRoomRedisDto {
 			.lastMessageTime(chatRoom.getLastMessageTime())
 			.build();
 	}
+	
+	public String getRedisKey() {
+		return "chat_room:" + this.roomId + ":" + lastSender + ":" + readCount;
+	}
+	
 }
 

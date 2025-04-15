@@ -21,12 +21,11 @@ public class UserSinkManager {
 	private final Map<String, Set<Sinks.Many<ChatRoomRedisDto>>> userSinks = new ConcurrentHashMap<>();
 	private final ChatRoomListService chatRoomListService;
 	
-	/**
-	 * 유저별 Sink 등록 (다중 브라우저/디바이스 지원)
-	 */
-	public void register(String userId, Sinks.Many<ChatRoomRedisDto> sink) {
-		userSinks.computeIfAbsent(userId, k -> new CopyOnWriteArraySet<>()).add(sink);
+	public Sinks.Many<ChatRoomRedisDto> register(String userId) {
+		Sinks.Many<ChatRoomRedisDto> sink = Sinks.many().multicast().onBackpressureBuffer();
+		userSinks.computeIfAbsent(userId, key -> ConcurrentHashMap.newKeySet()).add(sink);
 		log.info("✅ Sink 등록 - userId: {} (총 {}개)", userId, userSinks.get(userId).size());
+		return sink;
 	}
 	
 	/**
@@ -59,6 +58,7 @@ public class UserSinkManager {
 	 */
 	public void emitToRoom(String roomId, ChatRoomRedisDto dto) {
 		chatRoomListService.findAllParticipantsByRoomId(roomId)
+			.doOnNext(userId -> log.debug("→ {} 에게 Sink 전송 시도", userId))
 			.flatMap(userId -> {
 				emitToUser(userId, dto);
 				return Mono.empty();

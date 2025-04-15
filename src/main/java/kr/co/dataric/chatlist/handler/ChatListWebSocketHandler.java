@@ -1,10 +1,10 @@
 package kr.co.dataric.chatlist.handler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import kr.co.dataric.chatlist.dto.read.ReadCountMessage;
 import kr.co.dataric.chatlist.service.chatList.ChatRoomListService;
 import kr.co.dataric.chatlist.sink.UserSinkManager;
 import kr.co.dataric.common.dto.ChatRoomRedisDto;
+import kr.co.dataric.common.dto.ReadCountMessage;
 import kr.co.dataric.common.jwt.provider.JwtProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -49,7 +49,7 @@ public class ChatListWebSocketHandler implements WebSocketHandler {
 		
 		log.info("🔌 WebSocket 연결됨 - userId: {}", userId);
 		Sinks.Many<ChatRoomRedisDto> sink = Sinks.many().multicast().onBackpressureBuffer();
-		userSinkManager.register(userId, sink);
+		userSinkManager.register(userId);
 		
 		chatRoomListService.findAllByParticipant(userId)
 			.doOnNext(sink::tryEmitNext)
@@ -76,33 +76,17 @@ public class ChatListWebSocketHandler implements WebSocketHandler {
 		}
 	}
 	
-	public void emitToRoom(String roomId, ReadCountMessage msg) {
+	public void emitToRoom(String roomId, ChatRoomRedisDto dto) {
 		chatRoomListService.findAllParticipantsByRoomId(roomId)
-			.flatMap(userId ->
-				redisTemplate.opsForValue()
-					.get("chatList:" + roomId + ":" + userId)
-					.flatMap(json -> {
-						try {
-							ChatRoomRedisDto originalDto = objectMapper.readValue(json, ChatRoomRedisDto.class);
-							
-							// 👉 readCount 필드가 없다면 확장 DTO 또는 builder 사용
-							ChatRoomRedisDto updatedDto = ChatRoomRedisDto.builder()
-								.roomId(originalDto.getRoomId())
-								.roomName(originalDto.getRoomName())
-								.lastMessage(originalDto.getLastMessage())
-								.lastMessageTime(originalDto.getLastMessageTime())
-								.readCount(msg.getReadCount()) // ✅ 새로 추가된 값
-								.build();
-							
-							Set<Sinks.Many<ChatRoomRedisDto>> sinks = userSinkManager.get(userId);
-							if (sinks != null) {
-								sinks.forEach(sink -> sink.tryEmitNext(updatedDto));
-							}
-						} catch (Exception e) {
-							log.error("❌ emitToRoom - JSON 역직렬화 실패", e);
-						}
-						return Mono.empty();
-					})
-			).subscribe();
+			.flatMap(userId -> {
+				Set<Sinks.Many<ChatRoomRedisDto>> sinks = userSinkManager.get(userId);
+				if (sinks != null) {
+					sinks.forEach(sink -> {
+						log.info("📤 WebSocket 전송 - userId: {}, roomId: {}", userId, dto.getRoomId());
+						sink.tryEmitNext(dto);
+					});
+				}
+				return Mono.empty();
+			}).subscribe();
 	}
 }

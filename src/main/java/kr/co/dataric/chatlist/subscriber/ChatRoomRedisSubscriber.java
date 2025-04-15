@@ -2,6 +2,7 @@ package kr.co.dataric.chatlist.subscriber;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
+import kr.co.dataric.chatlist.handler.ChatListWebSocketHandler;
 import kr.co.dataric.chatlist.sink.UserSinkManager;
 import kr.co.dataric.common.dto.ChatRoomRedisDto;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +20,7 @@ public class ChatRoomRedisSubscriber {
 	
 	private final ReactiveStringRedisTemplate redisTemplate;
 	private final ObjectMapper objectMapper;
+	private final ChatListWebSocketHandler chatListWebSocketHandler;
 	private final UserSinkManager userSinkManager;
 	
 	@PostConstruct
@@ -28,8 +30,8 @@ public class ChatRoomRedisSubscriber {
 			.subscribe(message -> {
 				try {
 					ChatRoomRedisDto dto = objectMapper.readValue(message.getMessage(), ChatRoomRedisDto.class);
-					log.info("📨 Redis PubSub 수신: {}", dto);
-					userSinkManager.emitToRoom(dto.getRoomId(), dto);
+					log.info("📨 Redis PubSub 수신 - roomId : {}, lastMsg: {}", dto.getRoomId(), dto.getLastMessage());
+					chatListWebSocketHandler.emitToRoom(dto.getRoomId(), dto);
 				} catch (Exception e) {
 					log.error("❌ Redis PubSub 처리 실패", e);
 				}

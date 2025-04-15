@@ -1,6 +1,9 @@
 package kr.co.dataric.chatlist.service.chatList;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import kr.co.dataric.chatlist.dto.friends.FriendsChatRoomRequest;
+import kr.co.dataric.chatlist.dto.redis.RedisRoomEntry;
 import kr.co.dataric.chatlist.repository.room.ChatRoomRepository;
 import kr.co.dataric.chatlist.utils.generator.RoomIdGenerator;
 import kr.co.dataric.common.dto.ChatRoomRedisDto;
@@ -15,7 +18,7 @@ import reactor.core.publisher.Mono;
 import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
-import java.util.UUID;
+import java.util.Objects;
 
 
 @Slf4j
@@ -25,31 +28,34 @@ public class ChatRoomListService {
 	
 	private final ChatRoomRepository chatRoomRepository;
 	private final ReactiveStringRedisTemplate redisTemplate;
+	private final ObjectMapper objectMapper;
 	private final RoomIdGenerator roomIdGenerator;
 	
 	public Flux<ChatRoomRedisDto> findAllByParticipant(String userId) {
-		return chatRoomRepository.findByParticipantsContaining(userId)
-			.doOnNext(result -> log.info("resl :: {}", result))
-			.flatMap(room -> {
-				String key = "chat_room:" + room.getRoomId();
-				return redisTemplate.opsForValue().get(key)
-					.flatMap(value -> {
-						if (value != null && value.contains("||")) {
-							String[] parts = value.split("\\|\\|");
-							ChatRoomRedisDto dto = new ChatRoomRedisDto();
-							dto.setRoomId(room.getRoomId());
-							dto.setRoomName(room.getRoomName());
-							dto.setUserIds(room.getParticipants());
-							dto.setLastMessage(parts[0]);
-							dto.setLastMessageTime(LocalDateTime.parse(parts[1]));
-							return Mono.just(dto);
-						} else {
-							return Mono.just(ChatRoomRedisDto.from(room));
+		String redisKeySet = "chat_room_keys:" + userId;
+		
+		return redisTemplate.opsForSet().members(redisKeySet)
+			.flatMap(roomKey ->
+				redisTemplate.opsForValue().get(roomKey)
+					.map(json -> {
+						try {
+							ChatRoomRedisDto dto = objectMapper.readValue(json, ChatRoomRedisDto.class);
+							return dto;
+						} catch (Exception e) {
+							log.warn("❌ Redis JSON 역직렬화 실패 - key: {}", roomKey, e.getMessage());
+							return null;
 						}
 					})
-					.switchIfEmpty(Mono.just(ChatRoomRedisDto.from(room)));
-			})
-			.sort(Comparator.comparing(ChatRoomRedisDto::getLastMessageTime).reversed());
+			)
+			.filter(Objects::nonNull)
+			.sort((a, b) -> {
+				try {
+					return b.getLastMessageTime().compareTo(a.getLastMessageTime());
+				} catch (Exception e) {
+					log.warn("⚠️ 정렬 실패 - fallback 적용");
+					return 0;
+				}
+			}); // 최신 메시지 순
 	}
 	
 	public Mono<ChatRoom> createOrGetOneToOneRoom(FriendsChatRoomRequest friendDto) {
