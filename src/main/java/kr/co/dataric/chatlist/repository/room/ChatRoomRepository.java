@@ -11,5 +11,10 @@ public interface ChatRoomRepository extends ReactiveMongoRepository<ChatRoom, St
 	
 	@Query("{ 'participants': { $all: [?0, ?1] }, 'participants.2': { $exists: false } }")
 	Mono<ChatRoom> findOneToOneRoom(String userId, String friendId);
+	
+	/**
+	 * 채팅방 ID로 단일 채팅방 조회
+	 */
+	Mono<ChatRoom> findByRoomId(String roomId);
 }
 

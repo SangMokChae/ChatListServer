@@ -11,7 +11,6 @@ import reactor.core.publisher.Sinks;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArraySet;
 
 @Slf4j
 @Component
@@ -21,8 +20,7 @@ public class UserSinkManager {
 	private final Map<String, Set<Sinks.Many<ChatRoomRedisDto>>> userSinks = new ConcurrentHashMap<>();
 	private final ChatRoomListService chatRoomListService;
 	
-	public Sinks.Many<ChatRoomRedisDto> register(String userId) {
-		Sinks.Many<ChatRoomRedisDto> sink = Sinks.many().multicast().onBackpressureBuffer();
+	public Sinks.Many<ChatRoomRedisDto> register(String userId, Sinks.Many<ChatRoomRedisDto> sink) {
 		userSinks.computeIfAbsent(userId, key -> ConcurrentHashMap.newKeySet()).add(sink);
 		log.info("✅ Sink 등록 - userId: {} (총 {}개)", userId, userSinks.get(userId).size());
 		return sink;

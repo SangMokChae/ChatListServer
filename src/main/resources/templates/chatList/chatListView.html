@@ -29,6 +29,15 @@
 
 	socket.onmessage = function (event) {
 		const incoming = JSON.parse(event.data);
+
+		// 누락된 필드 기본값 설정
+		if (!incoming.userIds || incoming.userIds.length === 0) {
+			incoming.userIds = [userId];  // 또는 서버에서 따로 내려줄 defaultUserIds
+		}
+		if (!incoming.roomName) {
+			incoming.roomName = incoming.userIds.filter(e => e !== userId).join(',');
+		}
+		
 		chatRooms.set(incoming.roomId, {
 			...chatRooms.get(incoming.roomId),
 			...incoming

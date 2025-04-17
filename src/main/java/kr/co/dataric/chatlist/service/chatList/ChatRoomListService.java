@@ -15,8 +15,8 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 
@@ -31,31 +31,40 @@ public class ChatRoomListService {
 	private final ObjectMapper objectMapper;
 	private final RoomIdGenerator roomIdGenerator;
 	
+	/**
+	 * ✅ userId가 포함된 모든 채팅방 반환 (Mongo 기준 → Redis 캐싱 포함)
+	 */
 	public Flux<ChatRoomRedisDto> findAllByParticipant(String userId) {
-		String redisKeySet = "chat_room_keys:" + userId;
-		
-		return redisTemplate.opsForSet().members(redisKeySet)
-			.flatMap(roomKey ->
-				redisTemplate.opsForValue().get(roomKey)
-					.map(json -> {
-						try {
-							ChatRoomRedisDto dto = objectMapper.readValue(json, ChatRoomRedisDto.class);
-							return dto;
-						} catch (Exception e) {
-							log.warn("❌ Redis JSON 역직렬화 실패 - key: {}", roomKey, e.getMessage());
-							return null;
-						}
-					})
-			)
-			.filter(Objects::nonNull)
-			.sort((a, b) -> {
+		return chatRoomRepository.findByParticipantsContaining(userId)
+			.map(entity -> ChatRoomRedisDto.builder()
+				.roomId(entity.getRoomId())
+				.roomName(entity.getRoomName())
+				.lastMessage(entity.getLastMessage())
+				.lastMessageTime(entity.getLastMessageTime())
+				.userIds(entity.getParticipants())
+				.build())
+			.flatMap(dto -> {
+				// Redis 저장
+				String redisKey = "chat_room:" + dto.getRoomId();
+				String redisValue;
 				try {
-					return b.getLastMessageTime().compareTo(a.getLastMessageTime());
+					redisValue = objectMapper.writeValueAsString(dto);
 				} catch (Exception e) {
-					log.warn("⚠️ 정렬 실패 - fallback 적용");
-					return 0;
+					log.error("❌ Redis 직렬화 실패 - roomId: {}", dto.getRoomId(), e);
+					return Mono.empty();
 				}
-			}); // 최신 메시지 순
+				
+				return redisTemplate.opsForValue().set(redisKey, redisValue, Duration.ofDays(30))
+					.thenReturn(dto);
+			});
+	}
+	
+	/**
+	 * ✅ 특정 채팅방의 참여자 목록 조회
+	 */
+	public Flux<String> findAllParticipantsByRoomId(String roomId) {
+		return chatRoomRepository.findByRoomId(roomId)
+			.flatMapMany(room -> Flux.fromIterable(room.getParticipants()));
 	}
 	
 	public Mono<ChatRoom> createOrGetOneToOneRoom(FriendsChatRoomRequest friendDto) {
@@ -75,9 +84,4 @@ public class ChatRoomListService {
 			}));
 	}
 	
-	public Flux<String> findAllParticipantsByRoomId(String roomId) {
-		String key = "chatRoom:participants:"+roomId;
-		return redisTemplate.opsForSet().members(key)
-			.doOnNext(userId -> log.debug("참여자 조회 - roomId: {}, userI: {}", roomId, userId));
-	}
 }
