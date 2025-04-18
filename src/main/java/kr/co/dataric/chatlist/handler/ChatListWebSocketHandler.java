@@ -19,6 +19,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 
+import java.nio.ByteBuffer;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
@@ -70,25 +71,18 @@ public class ChatListWebSocketHandler implements WebSocketHandler {
 			.getReactiveConnection()
 			.keyCommands()
 			.scan(ScanOptions.scanOptions().match("chat_room:*").count(100).build())
-			.map(keyBuffer -> keyBuffer.toString())
+			.map(ByteBuffer::toString)
 			.flatMap(roomKey -> redisTemplate.opsForValue().get(roomKey)
-				.map(raw -> {
+				.flatMap(json -> {
 					try {
-						String[] parts = raw.split("\\|\\|");
-						if (parts.length != 2) {
-							log.warn("⚠️ Redis 포맷 이상 - key: {}", roomKey);
-							return null;
-						}
-						return ChatRoomRedisDto.builder()
-							.roomId(extractRoomIdFromKey(roomKey))
-							.lastMessage(parts[0])
-							.lastMessageTime(LocalDateTime.parse(parts[1]))
-							.build();
+						ChatRoomRedisDto dto = objectMapper.readValue(json, ChatRoomRedisDto.class);
+						return Mono.just(dto);
 					} catch (Exception e) {
-						log.warn("❌ Redis 파싱 실패 - key: {}, 이유: {}", roomKey, e.getMessage());
-						return null;
+						log.warn("❌ Redis JSON 파싱 실패 - key: {}, 이유: {}", roomKey, e.getMessage());
+						return Mono.empty();
 					}
-				}))
+				})
+			)
 			.filter(Objects::nonNull)
 			.sort((a, b) -> b.getLastMessageTime().compareTo(a.getLastMessageTime()))
 			.doOnNext(sink::tryEmitNext)
