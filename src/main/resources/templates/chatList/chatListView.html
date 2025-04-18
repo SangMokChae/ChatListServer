@@ -54,22 +54,21 @@
 
 		rooms.forEach(room => {
 			const div = document.createElement("div");
-			let roomName = null;
-			
-			if(room.roomName != null && room.roomName != "") {
-				roomName = room.roomName;
-			} else {
-				roomName = room.userIds.filter(e => e != userId).join(",");
+			let roomName = room.roomName || room.userIds.filter(e => e !== userId).join(",");
+
+			let badgeHTML = "";
+			if (room.readCount && room.readCount > 0) {
+				badgeHTML = `<span class="ml-2 bg-red-500 text-white text-xs px-2 py-1 rounded-full">${room.readCount}</span>`;
 			}
 			
-			// roomName이 null이 아니면 roomName으로
-			// roomName이 없으면 room.userIds 를 Set으로 변형한뒤, 본인을 제외하고 보여주기
 			div.innerHTML = `
 				<a href="#" data="${encodeURIComponent(room.roomId)}"
-					 class="block border border-gray-300 p-4 rounded-xl hover:bg-gray-50 transition-all"
-					 onclick="moveChatView(this)"
-				 >
-					<div class="font-semibold text-lg">${roomName}</div>
+				   class="block border border-gray-300 p-4 rounded-xl hover:bg-gray-50 transition-all relative"
+				   onclick="moveChatView(this)">
+					<div class="font-semibold text-lg flex items-center justify-between">
+						<span>${roomName}</span>
+						${badgeHTML}
+					</div>
 					<div class="text-sm text-gray-600">${room.lastMessage || "대화 없음"}</div>
 					<div class="text-xs text-gray-400 mt-1">${room.lastMessageTime || "-"}</div>
 					<input type="hidden" id="inUserIds" value="${room.userIds}" />

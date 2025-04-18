@@ -121,11 +121,20 @@ public class ChatListWebSocketHandler implements WebSocketHandler {
 			}).subscribe();
 	}
 	
-	private String extractRoomIdFromKey(String key) {
-		if (key.startsWith("chat_room:")) {
-			return key.substring("chat_room:".length());
-		}
-		return key;
+	public void emitReadCount(String roomId, int readCount) {
+		ChatRoomRedisDto dummy = ChatRoomRedisDto.builder()
+			.roomId(roomId)
+			.readCount(readCount)
+			.build();
+		
+		// userSinkManager 로 각 유저엑 전송
+		chatRoomListService.findAllParticipantsByRoomId(roomId)
+			.flatMap(userId -> {
+				Set<Sinks.Many<ChatRoomRedisDto>> sinks = userSinkManager.get(userId);
+				if (sinks != null) {
+					sinks.forEach(sink -> sink.tryEmitNext(dummy));
+				}
+				return Mono.empty();
+			}).subscribe();
 	}
-
 }
