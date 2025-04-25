@@ -3,8 +3,8 @@ package kr.co.dataric.chatlist.service.chatList;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import kr.co.dataric.chatlist.dto.friends.FriendsChatRoomRequest;
-import kr.co.dataric.chatlist.dto.redis.RedisRoomEntry;
 import kr.co.dataric.chatlist.repository.room.ChatRoomRepository;
+import kr.co.dataric.chatlist.repository.room.CustomChatRoomRepository;
 import kr.co.dataric.chatlist.utils.generator.RoomIdGenerator;
 import kr.co.dataric.common.dto.ChatRoomRedisDto;
 import kr.co.dataric.common.entity.ChatRoom;
@@ -18,7 +18,7 @@ import reactor.core.publisher.Mono;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Objects;
+import java.util.Map;
 
 
 @Slf4j
@@ -28,6 +28,7 @@ public class ChatRoomListService {
 	
 	private final ChatRoomRepository chatRoomRepository;
 	private final ReactiveStringRedisTemplate redisTemplate;
+	private final CustomChatRoomRepository customChatRoomRepository;
 	private final ObjectMapper objectMapper;
 	private final RoomIdGenerator roomIdGenerator;
 	
@@ -36,26 +37,51 @@ public class ChatRoomListService {
 	 */
 	public Flux<ChatRoomRedisDto> findAllByParticipant(String userId) {
 		return chatRoomRepository.findByParticipantsContaining(userId)
-			.map(entity -> ChatRoomRedisDto.builder()
-				.roomId(entity.getRoomId())
-				.roomName(entity.getRoomName())
-				.lastMessage(entity.getLastMessage())
-				.lastMessageTime(entity.getLastMessageTime())
-				.userIds(entity.getParticipants())
-				.build())
-			.flatMap(dto -> {
-				// Redis 저장
-				String redisKey = "chat_room:" + dto.getRoomId();
-				String redisValue;
-				try {
-					redisValue = objectMapper.writeValueAsString(dto);
-				} catch (Exception e) {
-					log.error("❌ Redis 직렬화 실패 - roomId: {}", dto.getRoomId(), e);
-					return Mono.empty();
-				}
+			.flatMap(entity -> {
+				ChatRoomRedisDto dto = ChatRoomRedisDto.builder()
+					.roomId(entity.getRoomId())
+					.roomName(entity.getRoomName())
+					.lastMessage(entity.getLastMessage())
+					.lastMessageTime(entity.getLastMessageTime())
+					.participants(entity.getParticipants())
+					.build();
 				
-				return redisTemplate.opsForValue().set(redisKey, redisValue, Duration.ofDays(30))
-					.thenReturn(dto);
+				String roomId = dto.getRoomId();
+				List<String> participants = dto.getParticipants();
+				
+				// ✅ 각 유저별 last_read 기반 unread count 계산
+				Flux<Map.Entry<String, Long>> unreadCountsFlux = Flux.fromIterable(participants)
+					.flatMap(uid -> {
+						String key = "last_read:" + roomId + ":" + uid;
+						return redisTemplate.opsForValue().get(key)
+							.flatMap(lastRead -> {
+								String[] parts = lastRead.split("_");
+								if (parts.length < 2) return Mono.just(Map.entry(uid, 1L));
+								String lastMsgId = parts[0];
+								LocalDateTime lastReadTime = LocalDateTime.parse(parts[1]);
+								return customChatRoomRepository.countUnreadMessages(roomId, lastMsgId, lastReadTime)
+									.map(cnt -> Map.entry(uid, cnt));
+							})
+							.switchIfEmpty(Mono.just(Map.entry(uid, 1L))); // 읽은 기록이 없으면 기본값 1
+					});
+				
+				// ✅ readCountMap 세팅 후 Redis 저장
+				return unreadCountsFlux.collectMap(Map.Entry::getKey, Map.Entry::getValue)
+					.flatMap(readCountMap -> {
+						dto.setReadCountMap(readCountMap);
+						String redisKey = "chat_room:" + roomId;
+						String redisValue;
+						try {
+							redisValue = objectMapper.writeValueAsString(dto);
+						} catch (JsonProcessingException e) {
+							log.error("Redis 직렬화 실패 - roomId: {}", roomId, e);
+							return Mono.just(dto); // Redis 저장 실패해도 dto는 리턴
+						}
+						
+						return redisTemplate.opsForValue().set(redisKey, redisValue, Duration.ofDays(30))
+							.doOnSuccess(ok -> log.info("🔁 Redis 저장 완료 - {}", redisKey))
+							.thenReturn(dto);
+					});
 			});
 	}
 	

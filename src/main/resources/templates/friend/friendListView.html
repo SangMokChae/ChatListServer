@@ -16,28 +16,34 @@
 </head>
 <body class="bg-gray-100 min-h-screen font-sans relative">
 
-<!-- ✅ 상단바 -->
-<div class="bg-white shadow p-4 flex justify-between items-center">
-	<h1 class="text-xl font-bold">친구 목록</h1>
+<!-- 토글 버튼 (기본은 보임) -->
+<button id="sidebarToggle" class="fixed top-4 left-4 z-50 bg-white p-2 rounded-full shadow-md">
+	<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none"
+			 viewBox="0 0 24 24" stroke="currentColor">
+		<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+					d="M4 6h16M4 12h16M4 18h16"/>
+	</svg>
+</button>
+
+<!-- 사이드바 + 외부 클릭 감지를 위한 wrapper -->
+<div id="sidebarWrapper" class="fixed inset-0 z-40 hidden">
+	<!-- 클릭 차단용 배경 (닫기 트리거) -->
+	<div id="sidebarOverlay" class="absolute inset-0 bg-black opacity-10"></div>
 	
-	<!-- ✅ 우측 메뉴 버튼 -->
-	<div class="relative">
-		<button id="menuButton" class="focus:outline-none">
-			<!-- Heroicons "bars-3" -->
-			<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
-					 stroke="currentColor" class="w-6 h-6">
-				<path stroke-linecap="round" stroke-linejoin="round"
-							d="M3.75 5.25h16.5m-16.5 6h16.5m-16.5 6h16.5"/>
-			</svg>
-		</button>
-		
-		<!-- ✅ 드롭다운 메뉴 -->
-		<div id="dropdownMenu"
-				 class="absolute right-0 mt-2 w-40 bg-white border border-gray-200 rounded-md shadow-lg z-10">
-			<a href="/view/friendSearchView"
-				 class="block px-4 py-2 text-gray-700 hover:bg-gray-100">🔍 친구 찾기</a>
-			<a href="/logout" class="block px-4 py-2 text-red-600 hover:bg-red-100">🚪 로그아웃</a>
-		</div>
+	<!-- 실제 사이드바 -->
+	<div id="sidebar" class="relative h-full w-64 bg-white shadow-lg transform -translate-x-full transition-transform duration-300 flex flex-col">
+		<div class="p-4 border-b font-semibold text-xl">👤 [[${userId}]]</div>
+		<nav class="flex-1 flex flex-col p-4 gap-2">
+			<a href="/view/friendListView" class="p-2 hover:bg-gray-100 rounded-lg flex items-center gap-2">
+				👥 친구 목록
+			</a>
+			<a href="/view/chatListView" class="p-2 hover:bg-gray-100 rounded-lg flex items-center gap-2">
+				💬 채팅 목록
+			</a>
+		</nav>
+		<a href="/logout" class="mt-auto p-4 border-t text-red-600 hover:bg-red-100 flex items-center gap-2">
+			🚪 로그아웃
+		</a>
 	</div>
 </div>
 
@@ -53,23 +59,8 @@
 	</div>
 </div>
 
-<!-- ✅ 메뉴 토글 스크립트 + 채팅방 이동 로직 -->
 <script th:inline="javascript">
 	const userId = [[${userId}]];
-	
-	document.getElementById('menuButton').addEventListener('click', function () {
-		const menu = document.getElementById('dropdownMenu');
-		menu.classList.toggle('show');
-	});
-
-	// 클릭 외부 영역 클릭 시 닫기
-	window.addEventListener('click', function (e) {
-		const menu = document.getElementById('dropdownMenu');
-		const button = document.getElementById('menuButton');
-		if (!button.contains(e.target) && !menu.contains(e.target)) {
-			menu.classList.remove('show');
-		}
-	});
 
 	// ✅ 친구 더블 클릭 시 채팅방 열기
 	function openChatWithFriend(friendId) {
@@ -99,7 +90,7 @@
 			// 방 새로 생성 할때 inUserIds 설정
 			const input2 = document.createElement('input');
 			input2.type = 'hidden';
-			input2.name = 'inUserIds';
+			input2.name = 'participants';
 			let inUserIdsArr = [userId, friendId];
 			input2.value = inUserIdsArr
 			form.appendChild(input2);
@@ -111,6 +102,28 @@
 			alert("채팅방 이동 실패: " + err.message);
 		});
 	}
+	
+	// list toggle
+	const sidebarToggle = document.getElementById("sidebarToggle");
+	const sidebarWrapper = document.getElementById("sidebarWrapper");
+	const sidebar = document.getElementById("sidebar");
+	const sidebarOverlay = document.getElementById("sidebarOverlay");
+
+	// 사이드바 열기
+	sidebarToggle.addEventListener("click", () => {
+		sidebarWrapper.classList.remove("hidden");
+		sidebar.classList.remove("-translate-x-full");
+		sidebarToggle.classList.add("hidden");
+	});
+
+	// 사이드바 닫기 (배경 클릭)
+	sidebarOverlay.addEventListener("click", () => {
+		sidebar.classList.add("-translate-x-full");
+		setTimeout(() => {
+			sidebarWrapper.classList.add("hidden");
+			sidebarToggle.classList.remove("hidden");
+		}, 300); // transition duration과 일치
+	});
 </script>
 
 </body>

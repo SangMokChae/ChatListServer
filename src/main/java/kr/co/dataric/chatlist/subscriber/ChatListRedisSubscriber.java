@@ -28,14 +28,8 @@ public class ChatListRedisSubscriber implements MessageListener {
 		
 		try {
 			if ("chatListUpdate".equals(channel)) {
-				String json = new String(message.getBody(), StandardCharsets.UTF_8);
-				ChatRoomRedisDto dto = objectMapper.readValue(json, ChatRoomRedisDto.class);
+				ChatRoomRedisDto dto = objectMapper.readValue(body, ChatRoomRedisDto.class);
 				handler.emitToRoom(dto.getRoomId(), dto);
-			} else if ("chatReadUpdate".equals(channel)) {
-				// TODO: ReadCountMessage 또는 유사 DTO로 처리
-				// 예: roomId, readCount 포함
-				ReadCountMessage readCount = objectMapper.readValue(body, ReadCountMessage.class);
-				handler.emitReadCount(readCount.getRoomId(), readCount.getReadCount());
 			} else {
 				log.warn("알 수 없는 Redis 채널 수신: {}", channel);
 			}

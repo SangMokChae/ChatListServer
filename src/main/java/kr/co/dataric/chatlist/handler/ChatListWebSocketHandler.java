@@ -62,7 +62,9 @@ public class ChatListWebSocketHandler implements WebSocketHandler {
 		
 		// ✅ Mongo 기준 최초 조회
 		Mono<Void> mongoInit = chatRoomListService.findAllByParticipant(userId)
-			.doOnNext(sink::tryEmitNext)
+			.doOnNext(dto -> {
+				emitPersonalizedDto(dto, userId, sink);
+			})
 			.then();
 		
 		// 2. Redis 기준 Scan 방식으로 실시간 방 목록 가져오기
@@ -85,7 +87,10 @@ public class ChatListWebSocketHandler implements WebSocketHandler {
 			)
 			.filter(Objects::nonNull)
 			.sort((a, b) -> b.getLastMessageTime().compareTo(a.getLastMessageTime()))
-			.doOnNext(sink::tryEmitNext)
+			.doOnNext(dto -> {
+				log.info("redisInt :: {}", dto);
+				emitPersonalizedDto(dto, userId, sink);
+			})
 			.then();
 		
 		// ✅ WebSocket 메시지 스트림 전송
@@ -96,6 +101,24 @@ public class ChatListWebSocketHandler implements WebSocketHandler {
 		// ✅ 병렬 실행 (Mongo + Redis)
 		return Mono.when(mongoInit, redisInit)
 			.then(session.send(output).and(onClose));
+	}
+	
+	private void emitPersonalizedDto(ChatRoomRedisDto dto, String userId, Sinks.Many<ChatRoomRedisDto> sink) {
+		Integer count = 0;
+		if (dto.getReadCountMap() != null) {
+			count = dto.getReadCountMap().getOrDefault(userId, 0L).intValue();
+		}
+		ChatRoomRedisDto userSpecificDto = ChatRoomRedisDto.builder()
+			.roomId(dto.getRoomId())
+			.roomName(dto.getRoomName())
+			.participants(dto.getParticipants())
+			.lastMessage(dto.getLastMessage())
+			.lastMessageTime(dto.getLastMessageTime())
+			.lastSender(dto.getLastSender())
+			.readCount(count) // 개인별 카운트
+			.build();
+		
+		sink.tryEmitNext(userSpecificDto);
 	}
 	
 	private String toJson(ChatRoomRedisDto dto) {
@@ -112,29 +135,25 @@ public class ChatListWebSocketHandler implements WebSocketHandler {
 			.flatMap(userId -> {
 				Set<Sinks.Many<ChatRoomRedisDto>> sinks = userSinkManager.get(userId);
 				if (sinks != null) {
-					sinks.forEach(sink -> {
-						log.info("📤 WebSocket 전송 - userId: {}, roomId: {}", userId, roomId);
-						sink.tryEmitNext(dto);
-					});
+					Integer count = 0;
+					if (dto.getReadCountMap() != null) {
+						count = dto.getReadCountMap().getOrDefault(userId, 0L).intValue();
+					}
+					
+					ChatRoomRedisDto personalDto = ChatRoomRedisDto.builder()
+						.roomId(dto.getRoomId())
+						.roomName(dto.getRoomName())
+						.participants(dto.getParticipants())
+						.lastMessage(dto.getLastMessage())
+						.lastMessageTime(dto.getLastMessageTime())
+						.lastSender(dto.getLastSender())
+						.readCount(count)
+						.build();
+					
+					sinks.forEach(sink -> sink.tryEmitNext(personalDto));
 				}
 				return Mono.empty();
 			}).subscribe();
 	}
-	
-	public void emitReadCount(String roomId, int readCount) {
-		ChatRoomRedisDto dummy = ChatRoomRedisDto.builder()
-			.roomId(roomId)
-			.readCount(readCount)
-			.build();
-		
-		// userSinkManager 로 각 유저엑 전송
-		chatRoomListService.findAllParticipantsByRoomId(roomId)
-			.flatMap(userId -> {
-				Set<Sinks.Many<ChatRoomRedisDto>> sinks = userSinkManager.get(userId);
-				if (sinks != null) {
-					sinks.forEach(sink -> sink.tryEmitNext(dummy));
-				}
-				return Mono.empty();
-			}).subscribe();
-	}
+
 }

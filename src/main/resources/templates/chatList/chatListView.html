@@ -6,15 +6,43 @@
 	<meta http-equiv="X-UA-Compatible" content="IE=edge">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<script th:src="@{https://cdn.tailwindcss.com}"></script>
+	<style>
+		.badge-container.nonBadge { display: none; }
+		.badge-container.inBadge { display: inline-block; }
+	</style>
 </head>
 <body class="bg-gray-100 min-h-screen font-sans relative">
-<!-- 로그아웃 버튼 -->
-<a href="/logout"
-	 class="absolute top-4 right-4 px-3 py-2 rounded-xl hover:bg-red-200 transition-all flex items-center gap-2">
-	<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="30" height="30">
-		<path fill-rule="evenodd" d="M16.5 3.75a1.5 1.5 0 0 1 1.5 1.5v13.5a1.5 1.5 0 0 1-1.5 1.5h-6a1.5 1.5 0 0 1-1.5-1.5V15a.75.75 0 0 0-1.5 0v3.75a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V5.25a3 3 0 0 0-3-3h-6a3 3 0 0 0-3 3V9A.75.75 0 1 0 9 9V5.25a1.5 1.5 0 0 1 1.5-1.5h6ZM5.78 8.47a.75.75 0 0 0-1.06 0l-3 3a.75.75 0 0 0 0 1.06l3 3a.75.75 0 0 0 1.06-1.06l-1.72-1.72H15a.75.75 0 0 0 0-1.5H4.06l1.72-1.72a.75.75 0 0 0 0-1.06Z" clip-rule="evenodd" />
+
+<!-- 토글 버튼 (기본은 보임) -->
+<button id="sidebarToggle" class="fixed top-4 left-4 z-50 bg-white p-2 rounded-full shadow-md">
+	<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none"
+			 viewBox="0 0 24 24" stroke="currentColor">
+		<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+					d="M4 6h16M4 12h16M4 18h16"/>
 	</svg>
-</a>
+</button>
+
+<!-- 사이드바 + 외부 클릭 감지를 위한 wrapper -->
+<div id="sidebarWrapper" class="fixed inset-0 z-40 hidden">
+	<!-- 클릭 차단용 배경 (닫기 트리거) -->
+	<div id="sidebarOverlay" class="absolute inset-0 bg-black opacity-10"></div>
+	
+	<!-- 실제 사이드바 -->
+	<div id="sidebar" class="relative h-full w-64 bg-white shadow-lg transform -translate-x-full transition-transform duration-300 flex flex-col">
+		<div class="p-4 border-b font-semibold text-xl">👤 [[${userId}]]</div>
+		<nav class="flex-1 flex flex-col p-4 gap-2">
+			<a href="/view/friendListView" class="p-2 hover:bg-gray-100 rounded-lg flex items-center gap-2">
+				👥 친구 목록
+			</a>
+			<a href="/view/chatListView" class="p-2 hover:bg-gray-100 rounded-lg flex items-center gap-2">
+				💬 채팅 목록
+			</a>
+		</nav>
+		<a href="/logout" class="mt-auto p-4 border-t text-red-600 hover:bg-red-100 flex items-center gap-2">
+			🚪 로그아웃
+		</a>
+	</div>
+</div>
 
 <div class="max-w-xl mx-auto p-6">
 	<h2 class="text-2xl font-bold mb-6 text-center">💬 채팅방 목록</h2>
@@ -29,76 +57,113 @@
 
 	socket.onmessage = function (event) {
 		const incoming = JSON.parse(event.data);
+		const roomId = incoming.roomId;
+		const newMsgId = incoming.msgId;
 
-		// 누락된 필드 기본값 설정
-		if (!incoming.userIds || incoming.userIds.length === 0) {
-			incoming.userIds = [userId];  // 또는 서버에서 따로 내려줄 defaultUserIds
-		}
-		if (!incoming.roomName) {
-			incoming.roomName = incoming.userIds.filter(e => e !== userId).join(',');
-		}
-		
-		chatRooms.set(incoming.roomId, {
-			...chatRooms.get(incoming.roomId),
-			...incoming
+		// 기본 보정
+		if (!incoming.participants || incoming.participants.length === 0) incoming.participants = [userId];
+		if (!incoming.roomName) incoming.roomName = incoming.participants.filter(e => e !== userId).join(',');
+
+		const prev = chatRooms.get(roomId) || {};
+		chatRooms.set(roomId, {
+			...prev,
+			...Object.fromEntries(Object.entries(incoming).filter(([_, v]) => v != null)),
+			lastMessage: incoming.lastMessage || prev.lastMessage || "대화 없음",
+			lastMessageTime: incoming.lastMessageTime || prev.lastMessageTime || "-",
+			roomName: incoming.roomName || prev.roomName || "",
+			participants: incoming.participants || prev.participants || [],
+			readCountMap: incoming.readCountMap || prev.readCountMap || {}
 		});
 
-		const sorted = Array.from(chatRooms.values())
+		// 정렬 및 재렌더링
+		const sortedRooms = Array.from(chatRooms.values())
 			.sort((a, b) => new Date(b.lastMessageTime) - new Date(a.lastMessageTime));
-
-		renderChatList(sorted);
+		renderChatList(sortedRooms);
 	};
 
 	function renderChatList(rooms) {
-		chatListEl.innerHTML = "";
+		const chatListEl = document.getElementById("chat-list");
+		chatListEl.innerHTML = ""; // 초기화 후 재정렬된 항목 삽입
 
 		rooms.forEach(room => {
+			const encodedRoomId = encodeURIComponent(room.roomId);
+			const badgeText = room.readCount >= 99 ? "99+" : (room.readCount > 0 ? room.readCount : 0);
+			const badgeClass = room.readCount > 0 ? "inBadge" : "nonBadge";
+			const badgeStyle = room.readCount > 0 ? "inline-block" : "none";
+			
 			const div = document.createElement("div");
-			let roomName = room.roomName || room.userIds.filter(e => e !== userId).join(",");
-
-			let badgeHTML = "";
-			if (room.readCount && room.readCount > 0) {
-				badgeHTML = `<span class="ml-2 bg-red-500 text-white text-xs px-2 py-1 rounded-full">${room.readCount}</span>`;
-			}
+			
+			const formattedTime = room.lastMessageTime.replace("T", " ").split(".")[0].slice(0, -3);
 			
 			div.innerHTML = `
-				<a href="#" data="${encodeURIComponent(room.roomId)}"
-				   class="block border border-gray-300 p-4 rounded-xl hover:bg-gray-50 transition-all relative"
-				   onclick="moveChatView(this)">
+				<a href="#" data="${encodedRoomId}"
+				   class="block border border-gray-300 p-4 rounded-xl hover:bg-gray-50 transition-all relative">
 					<div class="font-semibold text-lg flex items-center justify-between">
-						<span>${roomName}</span>
-						${badgeHTML}
+						<span>${room.roomName}</span>
+						<span class="ml-2 bg-red-500 text-white text-xs px-2 py-1 rounded-full badge-container ${badgeClass}"
+						      style="display: ${badgeStyle};">${badgeText}</span>
 					</div>
-					<div class="text-sm text-gray-600">${room.lastMessage || "대화 없음"}</div>
-					<div class="text-xs text-gray-400 mt-1">${room.lastMessageTime || "-"}</div>
-					<input type="hidden" id="inUserIds" value="${room.userIds}" />
+					<div class="w-64 text-sm text-gray-600 truncate">${room.lastMessage}</div>
+					<div class="text-xs text-gray-400 mt-1">${formattedTime}</div>
+					<input type="hidden" class="participants" value="${room.participants.join(",")}" />
 				</a>
 			`;
+			div.querySelector("a").onclick = () => moveChatView(div.querySelector("a"));
 			chatListEl.appendChild(div);
 		});
 	}
-	
-	const moveChatView = (e) => {
+
+	function moveChatView(el) {
+		const badge = el.querySelector(".badge-container");
+		if (badge) {
+			badge.innerText = "";
+			badge.style.display = "none";
+			badge.classList.remove("inBadge");
+			badge.classList.add("nonBadge");
+		}
+
 		const form = document.createElement('form');
 		form.method = 'POST';
-		form.action = '/view/chatView'
+		form.action = '/view/chatView';
 		form.enctype = 'application/x-www-form-urlencoded';
-		
+
 		const input = document.createElement('input');
 		input.type = 'hidden';
 		input.name = 'roomId';
-		input.value = e.getAttribute('data');
+		input.value = el.getAttribute('data');
 		form.appendChild(input);
-		
+
 		const input2 = document.createElement('input');
 		input2.type = 'hidden';
-		input2.name = 'inUserIds';
-		input2.value = e.querySelector("#inUserIds").value;
+		input2.name = 'participants';
+		input2.value = el.querySelector(".participants").value;
 		form.appendChild(input2);
-		
+
 		document.body.appendChild(form);
 		form.submit();
 	}
+	
+	// list toggle
+	const sidebarToggle = document.getElementById("sidebarToggle");
+	const sidebarWrapper = document.getElementById("sidebarWrapper");
+	const sidebar = document.getElementById("sidebar");
+	const sidebarOverlay = document.getElementById("sidebarOverlay");
+
+	// 사이드바 열기
+	sidebarToggle.addEventListener("click", () => {
+		sidebarWrapper.classList.remove("hidden");
+		sidebar.classList.remove("-translate-x-full");
+		sidebarToggle.classList.add("hidden");
+	});
+
+	// 사이드바 닫기 (배경 클릭)
+	sidebarOverlay.addEventListener("click", () => {
+		sidebar.classList.add("-translate-x-full");
+		setTimeout(() => {
+			sidebarWrapper.classList.add("hidden");
+			sidebarToggle.classList.remove("hidden");
+		}, 300); // transition duration과 일치
+	});
 </script>
 </body>
 </html>
